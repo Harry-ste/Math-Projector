@@ -1,5 +1,5 @@
 import os
-#hides tensorflow warnings
+#hides tensorflow warnings as hasen't been updated to fit the version of python I'm using
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
