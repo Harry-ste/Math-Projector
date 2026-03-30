@@ -2,7 +2,8 @@ import cv2
 import numpy as np
 from tensorflow.keras.models import load_model
 
-#intersection error, when 8 is written the cross over between the lines creates a small white dot and it detects 8 as two seperate numbers.
+#1. intersection error, when 8 is written the cross over between the lines creates a small white dot and it detects 8 as two seperate numbers.
+#2. Confidence is too high for number 6, when 6 written is usually gets it right but is only usually ~60% cinfident, so lower confidence required.
 
 # smaller = less blue
 BLUR_FACTOR = 3 
@@ -13,14 +14,16 @@ C=15
 # minimum pixel size to be detected
 MIN_CHARACTER_SIZE = 10
 # value between 0 and 1, decides wether confident enough to output
-CONFIDENCE_THRESHOLD = 0.8
+CONFIDENCE_THRESHOLD = 0.7
 # add extra space on sides to not cut off numbers, scales with the font size
-PADDING_MULTIPLIER = 0.2
+PADDING_MULTIPLIER = 0.1
 #
 BOX_COLOR = (0,255,0) #green
 TEXT_COLOR = (0,0,255) #red
-#
+#possible values a shape can be classified as
 LABELS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+#Pixels close enough to make same colour to fill in lighter gaps of pen strokes
+MERGE_RANGE = 6
 
 expression = ""
 
@@ -34,9 +37,16 @@ def image_processing(frame):
     blurred = cv2.GaussianBlur(frame, (BLUR_FACTOR, BLUR_FACTOR), 0)
     #sets to greyscale
     gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
-    
-    #Makes imsges inverted black and white, adaptive so adjusts to light intensity in areas of the screen
+
+    #Makes images inverted black and white, adaptive so adjusts to light intensity in areas of the screen
     threshold = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, BLOCKSIZE, C)
+    return threshold
+
+def close_small_gaps(threshold, MERGE_RANGE):
+    #creates a square by the size of MERGE_RANGE
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (MERGE_RANGE, MERGE_RANGE))
+    #puts the new box in the gap
+    threshold = cv2.morphologyEx(threshold, cv2.MORPH_CLOSE, kernel)
     return threshold
 
 def roi_reshaping(threshold, x1, y1, x2, y2):
@@ -54,6 +64,7 @@ def is_inside(box1, box2):
     centre_y = (y1_a + y2_a) / 2
     return x1_b <= centre_x <= x2_b and y1_b <= centre_y <= y2_b
 
+#removes boxes that are inside other boxes, used to fix intersection error
 def filter_boxes(boxes):
     filtered_boxes = []
     for i, box in enumerate(boxes):
@@ -88,7 +99,9 @@ while True:
     _, frame = webcam.read(0) #ret - boolean value indicating if the frame was read successfully
     
     threshold = image_processing(frame)
-    
+
+    #Closes small gaps in the contours to make it more likely to detect numbers as one shape instead of multiple shapes
+    threshold = close_small_gaps(threshold, MERGE_RANGE)
     #finds shapes in the image
     contours, _ = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     #sorts shapes from left to right
@@ -103,16 +116,19 @@ while True:
 
         aspect_ratio = width / height
 
+        #if the shapes are big enough to be a number
         if width > MIN_CHARACTER_SIZE and height > MIN_CHARACTER_SIZE and 0.2 < aspect_ratio < 2.0:
             
             x_padding = int(width * PADDING_MULTIPLIER)
             y_padding = int(height * PADDING_MULTIPLIER)
 
+            #adds padding to not cut off nmbers
             x1 = max(0, x - x_padding) #left edge
             y1 = max(0, y - y_padding) #top edge
-            x2 = min(frame.shape[1], x + width + x_padding) #right edge 
+            x2 = min(frame.shape[1], x + width + x_padding) #right edge
             y2 = min(frame.shape[0], y + height + y_padding) #bottom edge
 
+            #adds box to list of boxes
             boxes.append((x1, y1, x2, y2))
 
             list_of_filtered_boxes = filter_boxes(boxes)
